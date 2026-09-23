@@ -1,60 +1,81 @@
 package com.goldwithdrawamount;
 
-import net.runelite.api.Client;
-import net.runelite.client.ui.overlay.Overlay;
-import net.runelite.client.ui.overlay.OverlayLayer;
-import net.runelite.client.ui.overlay.OverlayPosition;
-
+import java.awt.AlphaComposite;
+import java.awt.Composite;
+import java.awt.Dimension;
+import java.awt.Graphics2D;
 import javax.inject.Inject;
-import java.awt.*;
-import java.time.Instant;
+import net.runelite.client.ui.overlay.OverlayLayer;
+import net.runelite.client.ui.overlay.OverlayPanel;
+import net.runelite.client.ui.overlay.OverlayPosition;
+import net.runelite.client.ui.overlay.components.LineComponent;
+import net.runelite.client.ui.overlay.components.TitleComponent;
+import net.runelite.client.util.QuantityFormatter;
 
-public class GoldWithdrawAmountOverlay extends Overlay
+/**
+ * Standard RuneLite info panel: movable (Alt + drag), resizable, and matches other plugins' overlays.
+ */
+class GoldPanelOverlay extends OverlayPanel
 {
-    private static final int DISPLAY_DURATION_MS = 10000;
+    private static final int PANEL_WIDTH = 160;
 
-    private final Client client;
-    private Instant showUntil;
+    private final GoldWithdrawAmountPlugin plugin;
+    private final GoldWithdrawAmountConfig config;
 
     @Inject
-    private GoldWithdrawAmountOverlay(Client client)
+    private GoldPanelOverlay(GoldWithdrawAmountPlugin plugin, GoldWithdrawAmountConfig config)
     {
-        this.client = client;
-        setPosition(OverlayPosition.ABOVE_CHATBOX_RIGHT);
-        setLayer(OverlayLayer.ABOVE_WIDGETS);
-    }
-
-    public void trigger()
-    {
-        showUntil = Instant.now().plusMillis(DISPLAY_DURATION_MS);
+        super(plugin);
+        this.plugin = plugin;
+        this.config = config;
+        setPosition(OverlayPosition.TOP_LEFT);
+        setLayer(OverlayLayer.ABOVE_WIDGETS); // stay visible on top of the bank interface
+        panelComponent.setPreferredSize(new Dimension(PANEL_WIDTH, 0));
     }
 
     @Override
     public Dimension render(Graphics2D graphics)
     {
-        if (showUntil == null || Instant.now().isAfter(showUntil))
+        final GoldAlert alert = plugin.getCurrentAlert();
+        final long now = System.currentTimeMillis();
+        if (alert == null || alert.isExpired(now) || !config.overlayStyle().showsPanel())
         {
             return null;
         }
 
-        String text = "High gold withdrawal!";
-        graphics.setFont(new Font("Arial", Font.BOLD, 18));
+        panelComponent.getChildren().add(TitleComponent.builder()
+                .text(alert.getTitle())
+                .color(alert.getColor())
+                .build());
 
+        panelComponent.getChildren().add(LineComponent.builder()
+                .left("Amount:")
+                .right(QuantityFormatter.formatNumber(alert.getAmount()))
+                .rightColor(alert.getColor())
+                .build());
 
-        FontMetrics metrics = graphics.getFontMetrics();
-        int x = 10;
-        int y = 50;
+        if (alert.getSource() != null)
+        {
+            panelComponent.getChildren().add(LineComponent.builder()
+                    .left("From:")
+                    .right(alert.getSource())
+                    .build());
+        }
 
-        graphics.setColor(Color.BLACK);
-        graphics.drawString(text, x - 1, y - 1);
-        graphics.drawString(text, x + 1, y - 1);
-        graphics.drawString(text, x - 1, y + 1);
-        graphics.drawString(text, x + 1, y + 1);
+        panelComponent.getChildren().add(LineComponent.builder()
+                .left("Threshold:")
+                .right(QuantityFormatter.formatNumber(alert.getThreshold()))
+                .build());
 
-        graphics.setColor(Color.RED);
-        graphics.drawString(text, x, y);
-
-        return new Dimension(metrics.stringWidth(text), metrics.getHeight());
+        final Composite original = graphics.getComposite();
+        graphics.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alert.opacity(now)));
+        try
+        {
+            return super.render(graphics);
+        }
+        finally
+        {
+            graphics.setComposite(original);
+        }
     }
 }
-
